@@ -1,0 +1,40 @@
+[project]
+name = "fdtd"
+version = "0.1.0"
+description = "Finite-difference time-domain electromagnetics solver in PyTorch"
+readme = "README.md"
+authors = [
+    { name = "jgwillingham", email = "jgwillin@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.5.4",
+    "torch>=2.15.0",
+]
+
+[project.optional-dependencies]
+viz = [
+    "matplotlib>=3.11.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = ["slow: long-running stability tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+    "scipy>=1.18.1",
+]
