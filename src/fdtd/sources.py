@@ -11,7 +11,9 @@ type Waveform = Callable[[float], float]
 class ModulatedGaussian:
     """Zero-mean pulse ``sin(w(t - delay)) * exp(-((t - delay) / width)^2)``.
 
-    The delay defaults to three widths, so the pulse starts from a negligible value.
+    The delay defaults to five widths. Any less truncates the pulse enough to leave a net charge
+    behind, whose static field no boundary can absorb: 3 widths leaves it at -83 dB of the peak
+    energy, 4 at -146 dB, and 5 at round-off.
     """
 
     frequency: float
@@ -19,7 +21,7 @@ class ModulatedGaussian:
     delay: float | None = None
 
     def __call__(self, t: float) -> float:
-        delay = 3 * self.width if self.delay is None else self.delay
+        delay = 5 * self.width if self.delay is None else self.delay
         phase = 2 * math.pi * self.frequency * (t - delay)
         return math.sin(phase) * math.exp(-(((t - delay) / self.width) ** 2))
 

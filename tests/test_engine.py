@@ -155,7 +155,7 @@ def reflection_error(refinement, n_index=2.0):
     r = refinement
     nx, ny, dx = 1100 * r, 8, 2e-3 / r
     source_x, probe_x, interface_x = 300 * r, 400 * r, 700 * r
-    pulse = fdtd.ModulatedGaussian(6e9, 3e-10)
+    pulse = fdtd.ModulatedGaussian(6e9, 3e-10, delay=9e-10)
     eps = torch.ones(nx, ny, dtype=torch.float64)
     eps[interface_x:] = n_index**2
 

@@ -17,7 +17,7 @@ def run(mode, shape, cells, offset, steps, dx=1.0, pml=True, **cpml_options):
     grid = Grid(shape, dx, mode, pml_cells=cells)
     position = [n // 2 * dx for n in shape]
     source = fdtd.PointSource(
-        component, tuple(position), fdtd.ModulatedGaussian(frequency, 1 / frequency)
+        component, tuple(position), fdtd.ModulatedGaussian(frequency, 0.7 / frequency)
     )
     position[0] += offset * dx
     probe = fdtd.Probe(component, tuple(position))
@@ -45,8 +45,26 @@ def test_reflection_2d(mode):
     assert reflection_db(mode, (60, 60), 20, (560, 560), 700) < -60
 
 
+@pytest.mark.slow
 def test_reflection_3d():
     assert reflection_db(Mode.FULL_3D, (30, 30, 30), 20, (240, 240, 240), 300) < -60
+
+
+def test_energy_leaves_3d_domain():
+    frequency = C0 / CELLS_PER_WAVELENGTH
+    energy = fdtd.Energy(every=10)
+    source = fdtd.PointSource(
+        "Ez", (10.0, 10.0, 10.0), fdtd.ModulatedGaussian(frequency, 1 / frequency)
+    )
+    sim = Simulation(
+        Grid((20, 20, 20), 1.0, pml_cells=8),
+        sources=[source],
+        monitors=[energy],
+        pml=CPML(frequency),
+        dtype=torch.float64,
+    )
+    sim.run(500)
+    assert energy.values[-1] < 1e-6 * max(energy.values)
 
 
 def test_pml_and_grid_must_agree():
@@ -77,7 +95,7 @@ def test_long_run_stability(touching_dielectric):
     eps = torch.ones(shape, dtype=torch.float64)
     if touching_dielectric:
         eps[40:] = 4.0
-    energy = fdtd.Energy(every=1000)
+    energy = fdtd.Energy(every=20)
     source = fdtd.PointSource("Ey", (30.0, 30.0), fdtd.ModulatedGaussian(frequency, 1 / frequency))
     sim = Simulation(
         Grid(shape, dx, Mode.TE, pml_cells=20),
@@ -90,5 +108,5 @@ def test_long_run_stability(touching_dielectric):
     sim.run(100_000)
     values = np.array(energy.values)
     assert np.isfinite(values).all()
-    assert values[-1] < 1e-6 * values.max()
-    assert values[50:].max() <= 10 * values[50]
+    late = values[len(values) // 2 :]
+    assert late.max() < 1e-12 * values.max()
