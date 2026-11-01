@@ -23,12 +23,7 @@ class YeeLattice:
 
 
     def __init__(self, size, dx, courant=None, field_dtype=np.double):
-        self.size = np.array(size)
-        self.dims = np.ceil(self.size/dx).astype(int)
-        self.D = len(self.dims)
-        self.dx = dx
-        self.courant = courant
-        self.dt = self._courant * self.dx / self.C0
+        self.update_dims(size, dx, courant)
 
         # Vector fields
         self.field_dtype = field_dtype
@@ -44,14 +39,18 @@ class YeeLattice:
         self._t = 0
 
         self._pml = False
-        self._Phi = 0
-        self._Psi = 0
 
         self._update_coefs()
+        self.kappa= np.ones((*self.dims,self.D), dtype=self.field_dtype)
 
 
-
-
+    def update_dims(self, size, dx, courant=None):
+        self.size = np.array(size)
+        self.dims = np.ceil(self.size/dx).astype(int)
+        self.D = len(self.dims)
+        self.dx = dx
+        self.courant = courant
+        self.dt = self._courant * self.dx / self.C0
 
     @property
     def D(self):
@@ -158,11 +157,11 @@ class YeeLattice:
         return self._pml
     @pml.setter
     def pml(self, val):
-        if val in [0,1,True,False]:
-            self._pml = val
+        if val:
+            self._pml = True
             self._update_coefs()
         else:
-            raise ValueError("pml attribute must be boolean")
+            self._pml = False
         
 
     def _update_coefs(self):
@@ -172,56 +171,85 @@ class YeeLattice:
         self._etoh = self._courant * np.divide(1, self._mu*self.ETA0)
 
         if self._pml:
-            L = 50
-            self.boundary_e = np.s_[-L:,:,:]
-            self.boundary_w = np.s_[:L,:,:]
-            self.boundary_n = np.s_[:,-L:,:]
-            self.boundary_s = np.s_[:,:L,:]
-            self.boundary_u = np.s_[:,:,-L:]
-            self.boundary_d = np.s_[:,:,:L]
 
-            sigma = 1e9*(np.tanh( 5*np.linspace(-1,1,L) ) + 1)/2
-            kappa = 1
-            alpha = 2e9
+            depth = 200
+
+            L = np.ceil(depth/self.dx).astype(int)
+            self.boundary_e = np.s_[-L:,:,:,0]
+            self.boundary_w = np.s_[:L,:,:,0]
+            self.boundary_n = np.s_[:,-L:,:,1]
+            self.boundary_s = np.s_[:,:L,:,1]
+            self.boundary_u = np.s_[:,:,-L:,2]
+            self.boundary_d = np.s_[:,:,:L,2]
+
+            EPS0 = 8.85418782e-12
+            m = 3
+            sigmamax = (m+1)/(150*np.pi*self.dx)/EPS0
+            kappamax = 15
+            alphamax = 0.05/EPS0
+
+            sigma_fn = lambda z : sigmamax * np.abs(z/depth)**m
+            kappa_fn = lambda z : kappamax * (1 - np.abs(z/depth)**m)
+            alpha_fn = lambda z : alphamax * np.abs(z/depth)
+
+            dist_from_boundary = np.arange(L)*self.dx
+
+            tilex = (1, self.dims[1], self.dims[2])
+            tiley = (self.dims[0], 1, self.dims[2])
+            tilez = (self.dims[0], self.dims[1], 1)
+
+            s = sigma_fn(dist_from_boundary)  
+            sx = np.reshape( s, (L,1,1) )
+            sy = np.reshape( s, (1,L,1) )
+            sz = np.reshape( s, (1,1,L) )
+            sigma = np.zeros((*self.dims, self.D), self.field_dtype)
+            sigma[self.boundary_e] = np.tile(sx, tilex)
+            sigma[self.boundary_w] = np.tile(np.flip(sx), tilex)
+            sigma[self.boundary_n] = np.tile(sy, tiley)
+            sigma[self.boundary_s] = np.tile(np.flip(sy), tiley)
+            #sigma[self.boundary_u] = np.tile(sz, tilez)
+            #sigma[self.boundary_d] = np.tile(np.flip(sz), tilez)
+
+            k = kappa_fn(dist_from_boundary)            
+            kx = np.reshape( k, (L,1,1) )
+            ky = np.reshape( k, (1,L,1) )
+            kz = np.reshape( k, (1,1,L) )
+            kappa = np.ones((*self.dims, self.D), self.field_dtype) # kappa = 1 in free space
+            kappa[self.boundary_e] = np.tile(kx, tilex)
+            kappa[self.boundary_w] = np.tile(np.flip(kx), tilex)
+            kappa[self.boundary_n] = np.tile(ky, tiley)
+            kappa[self.boundary_s] = np.tile(np.flip(ky), tiley)
+            #kappa[self.boundary_u] = np.tile(kz, tilez)
+            #kappa[self.boundary_d] = np.tile(np.flip(kz), tilez)
+
+            a = alpha_fn(dist_from_boundary)            
+            ax = np.reshape( a, (L,1,1) )
+            ay = np.reshape( a, (1,L,1) )
+            az = np.reshape( a, (1,1,L) )
+            alpha = np.zeros((*self.dims, self.D), self.field_dtype)
+            alpha[self.boundary_e] = np.tile(ax, tilex)
+            alpha[self.boundary_w] = np.tile(np.flip(ax), tilex)
+            alpha[self.boundary_n] = np.tile(ay, tiley)
+            alpha[self.boundary_s] = np.tile(np.flip(ay), tiley)
+            #alpha[self.boundary_u] = np.tile(az, tilez)
+            #alpha[self.boundary_d] = np.tile(np.flip(az), tilez)
+
+            xi = np.add(alpha, np.divide(sigma, kappa))
+
+            #self.QEcoef1 = np.divide( 2-xi*self.dt, 2+xi*self.dt )
+            self.QEcoef1 = np.divide( 1, 1 + xi*self.dt)
+            #self.QEcoef2 = np.divide( 2*sigma*self.dt, np.multiply( np.power(kappa,2), 2+xi*self.dt ) )
+            self.QEcoef2 = np.divide( sigma*self.dt, np.multiply( np.power(kappa,2), 1+xi*self.dt ) )
+            self.QHcoef1 = self.QEcoef1
+            self.QHcoef2 = self.QEcoef2
+
+            self._QE = np.zeros((*self.dims, 3, 3), self.field_dtype)
+            self._QH = np.zeros((*self.dims, 3, 3), self.field_dtype)
+
+            self.kappa = kappa
             self.pmlsigma = sigma
-            a = np.exp(-(sigma/kappa + alpha)*self.dt)
-            a = np.reshape(a, (L,1,1))
-            self.pmla = a
-
-            cfactor = np.divide(sigma , sigma*kappa + kappa**2*alpha)
-            cfactor = np.reshape(cfactor, (L,1,1))
-
-            self._ax = np.ones(self.dims, self.field_dtype)
-            self._cx = np.zeros(self.dims, self.field_dtype)
-            tiling_x = (1, self.dims[1], self.dims[2])
-            self._ax[self.boundary_e] = np.tile(a, tiling_x)
-            self._ax[self.boundary_w] = np.tile(np.flip(a), tiling_x)
-            self._cx[self.boundary_e] = np.multiply(np.tile(cfactor, tiling_x), self._ax[self.boundary_e] - 1) 
-            self._cx[self.boundary_w] = np.multiply(np.tile(np.flip(cfactor), tiling_x), self._ax[self.boundary_w] - 1)
-
-            self._ay = np.ones(self.dims, self.field_dtype)
-            self._cy = np.zeros(self.dims, self.field_dtype)
-            tiling_y = (self.dims[0], 1, self.dims[2])
-            self._ay[self.boundary_n] = np.tile(np.reshape(a, (1,L,1)), tiling_y)
-            self._ay[self.boundary_s] = np.tile(np.reshape(np.flip(a), (1,L,1)), tiling_y)
-            self._cy[self.boundary_n] = np.multiply(np.tile(np.reshape(cfactor, (1,L,1)), tiling_y), self._ay[self.boundary_n] - 1) 
-            self._cy[self.boundary_s] = np.multiply(np.tile(np.reshape(np.flip(cfactor), (1,L,1)), tiling_y), self._ay[self.boundary_s] - 1)
-
-            
-            self._az = np.ones(self.dims, self.field_dtype)
-            self._cz = np.zeros(self.dims, self.field_dtype)#np.multiply(cfactor, self._az - 1) 
-
-            # tiling_z = (self.dims[0], self.dims[1], 1)
-            # self._az[self.boundary_u] = np.tile(np.reshape(a, (1,1,L)), tiling_z)
-            # self._az[self.boundary_d] = np.tile(np.reshape(np.flip(a), (1,1,L)), tiling_z)
-
-            self._a = np.zeros((*self.dims, self.D), self.field_dtype)
-            self._a[:,:,:,0] = self._ax
-            self._a[:,:,:,1] = self._ay
-            self._a[:,:,:,2] = self._az
-
-            self._Phi = np.zeros((*self.dims, self.D), self.field_dtype)
-            self._Psi = np.zeros((*self.dims, self.D), self.field_dtype)
+            self.alpha = alpha
+            self.xi = xi
 
 
 
@@ -241,26 +269,35 @@ class YeeLattice:
         Fx = F[:,:,:,0]
         Fy = F[:,:,:,1]
         Fz = F[:,:,:,2]
+
         if put_on_half_grid:
+            kx = self.kappa[1:,:,:,0]
+            ky = self.kappa[:,1:,:,1]
+            kz = self.kappa[:,:,1:,2]   
+
             # curlF_x = dFz/dy - dFy/dz
-            curlF[:, 1:, :, 0] += np.diff(Fz, axis=1) # dFz/dy
-            curlF[:, :, 1:, 0] -= np.diff(Fy, axis=2) # dFy/dz 
+            curlF[:, 1:, :, 0] += np.divide( np.diff(Fz, axis=1), ky )# dFz/dy
+            curlF[:, :, 1:, 0] -= np.divide( np.diff(Fy, axis=2), kz ) # dFy/dz 
             # curlF_y = dFx/dz - dFz/dx
-            curlF[:, :, 1:, 1] += np.diff(Fx, axis=2) # dFx/dz
-            curlF[1:, :, :, 1] -= np.diff(Fz, axis=0) # dFz/dx
+            curlF[:, :, 1:, 1] += np.divide( np.diff(Fx, axis=2), kz ) # dFx/dz
+            curlF[1:, :, :, 1] -= np.divide( np.diff(Fz, axis=0), kx ) # dFz/dx
             # curlF_z = dFy/dx - dFx/dy
-            curlF[1:, :, :, 2] += np.diff(Fy, axis=0) # dFy/dx
-            curlF[:, 1:, :, 2] -= np.diff(Fx, axis=1) # dFx/dy
+            curlF[1:, :, :, 2] += np.divide( np.diff(Fy, axis=0), kx ) # dFy/dx
+            curlF[:, 1:, :, 2] -= np.divide( np.diff(Fx, axis=1), ky ) # dFx/dy
         else:
+            kx = self.kappa[:-1,:,:,0]
+            ky = self.kappa[:,:-1,:,1]
+            kz = self.kappa[:,:,:-1,2]   
+
             # curlF_x = dFz/dy - dFy/dz
-            curlF[:, :-1, :, 0] += np.diff(Fz, axis=1) # dFz/dy
-            curlF[:, :, :-1, 0] -= np.diff(Fy, axis=2) # dFy/dz 
+            curlF[:, :-1, :, 0] += np.divide( np.diff(Fz, axis=1), ky ) # dFz/dy
+            curlF[:, :, :-1, 0] -= np.divide( np.diff(Fy, axis=2), kz )# dFy/dz 
             # curlF_y = dFx/dz - dFz/dx
-            curlF[:, :, :-1, 1] += np.diff(Fx, axis=2) # dFx/dz
-            curlF[:-1, :, :, 1] -= np.diff(Fz, axis=0) # dFz/dx
+            curlF[:, :, :-1, 1] += np.divide( np.diff(Fx, axis=2), kz ) # dFx/dz
+            curlF[:-1, :, :, 1] -= np.divide( np.diff(Fz, axis=0), kx ) # dFz/dx
             # curlF_z = dFy/dx - dFx/dy
-            curlF[:-1, :, :, 2] += np.diff(Fy, axis=0) # dFy/dx
-            curlF[:, :-1, :, 2] -= np.diff(Fx, axis=1) # dFx/dy
+            curlF[:-1, :, :, 2] += np.divide( np.diff(Fy, axis=0), kx ) # dFy/dx
+            curlF[:, :-1, :, 2] -= np.divide( np.diff(Fx, axis=1), ky ) # dFx/dy
 
         return curlF
     
@@ -278,17 +315,29 @@ class YeeLattice:
             self._update_source(self._t)
 
             if self._pml:
-                self._Phi = self._update_convpml(self._Phi, self.E, True)
+                self._update_QE()
 
             # Take curl of E(n) and update H(n-1/2) to H(n+1/2)
-            curlE = self.curl(self.E, True) + self._Phi
+            curlE = self.curl(self.E, True)
+
+            if self._pml:
+                curlE[:,:,:,0] += self._QE[:,:,:,1,2] - self._QE[:,:,:,2,1]
+                curlE[:,:,:,1] += self._QE[:,:,:,2,0] - self._QE[:,:,:,0,2]
+                curlE[:,:,:,2] += self._QE[:,:,:,0,1] - self._QE[:,:,:,1,0]
+
             self.H = self.H - np.multiply(self._etoh, curlE)
 
             if self._pml:
-                self._Psi = self._update_convpml(self._Psi, self.H, False)
+                self._update_QH()
 
             # Take curl of H(n+1/2) and update E(n) to E(n+1)
-            curlH = self.curl(self.H, False) + self._Psi
+            curlH = self.curl(self.H, False) 
+
+            if self._pml:
+                curlH[:,:,:,0] += self._QH[:,:,:,1,2] - self._QH[:,:,:,2,1]
+                curlH[:,:,:,1] += self._QH[:,:,:,2,0] - self._QH[:,:,:,0,2]
+                curlH[:,:,:,2] += self._QH[:,:,:,0,1] - self._QH[:,:,:,1,0]
+
             self.E = np.multiply(self._etoe, self.E) + np.multiply(self._htoe, curlH) -  self.J
 
 
@@ -310,49 +359,43 @@ class YeeLattice:
             self.J = self.update_source(t)
 
 
-    def _update_convpml(self, psi : np.ndarray, F : np.ndarray, put_on_half_grid):
+    def _update_QE(self):
         """
-        Compute the curl of a vector field over R3 for convolutional PML
-        Parameters
-        ----------
-        psi : ndarray
-            Convolution vector field in PML
-        F : ndarray
-            Vector field stored in ndarray of size [Lx,Ly,Lz,3]
-        put_on_half_grid : bool
-            Put output on half-integer positions in grid
+        Update the auxiliary fields Q^E 
         """
-        newpsi = np.zeros_like(psi)
-        Fx = F[:,:,:,0]
-        Fy = F[:,:,:,1]
-        Fz = F[:,:,:,2]
-        psi_x = psi[:,:,:,0]
-        psi_y = psi[:,:,:,1]
-        psi_z = psi[:,:,:,2]
-        
-        if put_on_half_grid:            
-            # curlF_x = dFz/dy - dFy/dz
-            newpsi[:, 1:, :, 0] += np.multiply(self._cy[:,1:,:], np.diff(Fz, axis=1)) + np.multiply(self._ay[:,1:,:], psi_x[:,1:,:]) # dFz/dy
-            newpsi[:, :, 1:, 0] -= np.multiply(self._cz[:,:,1:], np.diff(Fy, axis=2)) + np.multiply(self._az[:,:,1:], psi_x[:,:,1:]) # dFy/dz 
-            # curlF_y = dFx/dz - dFz/dx
-            newpsi[:, :, 1:, 1] += np.multiply(self._cz[:,:,1:], np.diff(Fx, axis=2)) + np.multiply(self._az[:,:,1:], psi_y[:,:,1:]) # dFx/dz
-            newpsi[1:, :, :, 1] -= np.multiply(self._cx[1:,:,:], np.diff(Fz, axis=0)) + np.multiply(self._ax[1:,:,:], psi_y[1:,:,:]) # dFz/dx
-            # curlF_z = dFy/dx - dFx/dy
-            newpsi[1:, :, :, 2] += np.multiply(self._cx[1:,:,:], np.diff(Fy, axis=0)) + np.multiply(self._ax[1:,:,:], psi_z[1:,:,:]) # dFy/dx
-            newpsi[:, 1:, :, 2] -= np.multiply(self._cy[:,1:,:], np.diff(Fx, axis=1)) + np.multiply(self._ay[:,1:,:], psi_z[:,1:,:]) # dFx/dy
-        else:
-            # curlF_x = dFz/dy - dFy/dz
-            newpsi[:, :-1, :, 0] += np.multiply(self._cy[:,:-1,:], np.diff(Fz, axis=1)) + np.multiply(self._ay[:,:-1,:], psi_x[:,:-1,:]) # dFz/dy
-            newpsi[:, :, :-1, 0] -= np.multiply(self._cz[:,:,:-1], np.diff(Fy, axis=2)) + np.multiply(self._az[:,:,:-1], psi_x[:,:,:-1]) # dFy/dz 
-            # curlF_y = dFx/dz - dFz/dx
-            newpsi[:, :, :-1, 1] += np.multiply(self._cz[:,:,:-1], np.diff(Fx, axis=2)) + np.multiply(self._az[:,:,:-1], psi_y[:,:,:-1]) # dFx/dz
-            newpsi[:-1, :, :, 1] -= np.multiply(self._cx[:-1,:,:], np.diff(Fz, axis=0)) + np.multiply(self._ax[:-1,:,:], psi_y[:-1,:,:]) # dFz/dx
-            # curlF_z = dFy/dx - dFx/dy
-            newpsi[:-1, :, :, 2] += np.multiply(self._cx[:-1,:,:], np.diff(Fy, axis=0)) + np.multiply(self._ax[:-1,:,:], psi_z[:-1,:,:]) # dFy/dx
-            newpsi[:, :-1, :, 2] -= np.multiply(self._cy[:,:-1,:], np.diff(Fx, axis=1)) + np.multiply(self._ay[:,:-1,:], psi_z[:,:-1,:]) # dFx/dy
+        self._QE[:,:,:,0,1] = np.multiply(self.QEcoef1[:,:,:,0], self._QE[:,:,:,0,1])
+        self._QE[:,:,:,0,2] = np.multiply(self.QEcoef1[:,:,:,0], self._QE[:,:,:,0,2])
+        self._QE[:,:,:,1,2] = np.multiply(self.QEcoef1[:,:,:,1], self._QE[:,:,:,1,2])
+        self._QE[:,:,:,1,0] = np.multiply(self.QEcoef1[:,:,:,1], self._QE[:,:,:,1,0])
+        self._QE[:,:,:,2,0] = np.multiply(self.QEcoef1[:,:,:,2], self._QE[:,:,:,2,0])
+        self._QE[:,:,:,2,1] = np.multiply(self.QEcoef1[:,:,:,2], self._QE[:,:,:,2,1])
 
-        return newpsi
-    
+        self._QE[:-1,:,:,0,1] -= np.multiply(self.QEcoef2[:-1,:,:,0], np.diff(self.E[:,:,:,1], axis=0))
+        self._QE[:-1,:,:,0,2] -= np.multiply(self.QEcoef2[:-1,:,:,0], np.diff(self.E[:,:,:,2], axis=0))
+        self._QE[:,:-1,:,1,2] -= np.multiply(self.QEcoef2[:,:-1,:,1], np.diff(self.E[:,:,:,2], axis=1))
+        self._QE[:,:-1,:,1,0] -= np.multiply(self.QEcoef2[:,:-1,:,1], np.diff(self.E[:,:,:,0], axis=1))
+        self._QE[:,:,:-1,2,0] -= np.multiply(self.QEcoef2[:,:,:-1,2], np.diff(self.E[:,:,:,0], axis=2))
+        self._QE[:,:,:-1,2,1] -= np.multiply(self.QEcoef2[:,:,:-1,2], np.diff(self.E[:,:,:,1], axis=2))
+
+
+    def _update_QH(self):
+        """
+        Update the auxiliary fields Q^H
+        """
+        self._QH[:,:,:,0,1] = np.multiply(self.QHcoef1[:,:,:,0], self._QH[:,:,:,0,1])
+        self._QH[:,:,:,0,2] = np.multiply(self.QHcoef1[:,:,:,0], self._QH[:,:,:,0,2])
+        self._QH[:,:,:,1,2] = np.multiply(self.QHcoef1[:,:,:,1], self._QH[:,:,:,1,2])
+        self._QH[:,:,:,1,0] = np.multiply(self.QHcoef1[:,:,:,1], self._QH[:,:,:,1,0])
+        self._QH[:,:,:,2,0] = np.multiply(self.QHcoef1[:,:,:,2], self._QH[:,:,:,2,0])
+        self._QH[:,:,:,2,1] = np.multiply(self.QHcoef1[:,:,:,2], self._QH[:,:,:,2,1])
+
+        self._QH[1:,:,:,0,1] -= np.multiply(self.QHcoef2[1:,:,:,0], np.diff(self.H[:,:,:,1], axis=0))
+        self._QH[1:,:,:,0,2] -= np.multiply(self.QHcoef2[1:,:,:,0], np.diff(self.H[:,:,:,2], axis=0))
+        self._QH[:,1:,:,1,2] -= np.multiply(self.QHcoef2[:,1:,:,1], np.diff(self.H[:,:,:,2], axis=1))
+        self._QH[:,1:,:,1,0] -= np.multiply(self.QHcoef2[:,1:,:,1], np.diff(self.H[:,:,:,0], axis=1))
+        self._QH[:,:,1:,2,0] -= np.multiply(self.QHcoef2[:,:,1:,2], np.diff(self.H[:,:,:,0], axis=2))
+        self._QH[:,:,1:,2,1] -= np.multiply(self.QHcoef2[:,:,1:,2], np.diff(self.H[:,:,:,1], axis=2))
+
 
     def space2grid(self, x):
         """
@@ -362,6 +405,7 @@ class YeeLattice:
         xidx = np.floor(x_dx).astype(int)
         return xidx
     
+
     def grid2space(self, xidx):
         """
         Convert given Yee cell indices into real spatial coordinates
@@ -371,6 +415,7 @@ class YeeLattice:
             raise ValueError("Input is outside of grid bounds")
         return x
     
+
     def inbounds(self, x):
         """
         Check if spatial position is within domain

@@ -19,12 +19,12 @@ locx = 500
 locy = 500
 locz = 0
 
-wavelen = 250 # in meters
+wavelen = 245 # in meters
 pts_per_wavelen = 50
 
 pow = True
 
-pml = True
+pml = False
 
 #------------------------------------------------
 dx = wavelen/pts_per_wavelen
@@ -74,22 +74,50 @@ F.reset()
 
 
 if pml:
-    plt.plot(F.pmlsigma)
+    plt.imshow(F.kappa[:,:,0,0])
+    plt.title('Kappa')
     plt.show()
 
-    plt.plot(F.pmla[:,0,0])
+    plt.plot(F.kappa[:,0,0,0])
     plt.show()
 
-    plt.imshow(F._ax[:,:,0])
+    plt.imshow(F.pmlsigma[...,0,0])
+    plt.title('Sigma')
     plt.show()
 
-    plt.plot(F._ax[:,locyIdx,0])
+    plt.plot(F.pmlsigma[:,0,0,0])
     plt.show()
 
-    plt.imshow(F._ay[:,:,0])
+    plt.imshow(F.alpha[...,0,0])
+    plt.title('alpha')
+    plt.show()
+    plt.plot(F.alpha[:,0,0,0])
+    plt.title('alpha')
     plt.show()
 
-    plt.plot(F._ay[locxIdx,:,0])
+    plt.imshow(F.xi[...,0,0])
+    plt.title('xi')
+    plt.show()
+
+    plt.plot(F.xi[:,0,0,0])
+    plt.title('xi')
+    plt.show()
+
+    plt.imshow(F.QEcoef1[...,0,0])
+    plt.title('QEcoef1')
+    plt.show()
+
+    plt.plot(F.QEcoef1[:,0,0,0])
+    plt.title('QEcoef1')
+    plt.show()
+
+
+    plt.imshow(F.QEcoef2[...,0,0])
+    plt.title('QEcoef2')
+    plt.show()
+
+    plt.plot(F.QEcoef2[:,0,0,0])
+    plt.title('QEcoef2')
     plt.show()
 
 frames = []
