@@ -18,8 +18,8 @@ from fdtd.viz import animate_snapshot, plot_frames
 WAVELENGTH = 245.0  # m
 POINTS_PER_WAVELENGTH = 50
 DOMAIN = 1000.0  # m
-STEPS = 2000
-FRAME_INTERVAL = 10
+STEPS = 1250
+FRAME_INTERVAL = 5
 
 
 def simulate() -> tuple[Grid, fdtd.Snapshot]:
@@ -29,7 +29,7 @@ def simulate() -> tuple[Grid, fdtd.Snapshot]:
     grid = Grid((nodes, nodes), dx, Mode.TE, pml_cells=20)
 
     source = fdtd.PointSource(
-        "Ey", (DOMAIN / 2, DOMAIN / 2), fdtd.ModulatedGaussian(frequency, 1 / frequency)
+        "Ey", (DOMAIN / 2, DOMAIN / 2), fdtd.ModulatedGaussian(frequency, 2 / frequency)
     )
     snapshot = fdtd.Snapshot(("Ex",), every=FRAME_INTERVAL)
     sim = Simulation(grid, sources=[source], monitors=[snapshot], pml=CPML(frequency))
