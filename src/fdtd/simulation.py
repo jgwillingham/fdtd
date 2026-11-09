@@ -71,10 +71,13 @@ class Simulation:
             self._h_updates += h_terms
             self._e_updates += e_terms
 
-        self._sources = [
-            (s, self.fields[s.component], grid.nearest_index(s.component, s.position))
-            for s in sources
-        ]
+        self._sources = []
+        for s in sources:
+            index = grid.nearest_index(s.component, s.position)
+            scale = self._e_source
+            if isinstance(scale, torch.Tensor):
+                scale = scale[index].item()  # read once here, not every step
+            self._sources.append((s, self.fields[s.component], index, scale))
 
     @property
     def time(self) -> float:
@@ -126,8 +129,5 @@ class Simulation:
 
     def _apply_sources(self) -> None:
         t = (self.step_count + 0.5) * self.grid.dt  # J sits between E(n) and E(n + 1)
-        for source, field, index in self._sources:
-            scale = self._e_source
-            if isinstance(scale, torch.Tensor):
-                scale = scale[index].item()
+        for source, field, index, scale in self._sources:
             field[index] -= scale * source.amplitude * source.waveform(t)
