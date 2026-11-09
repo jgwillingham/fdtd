@@ -12,6 +12,7 @@ uv run pytest                     # fast tests
 uv run pytest -o addopts="" -m slow   # long stability and 3D reflection tests
 uv run python benchmarks/bench_step.py
 uv run --extra viz python examples/dipole_2d.py
+uv run --extra viz python examples/dipole_over_earth.py   # batched sweep of earth conductivity
 ```
 
 The default wheels are CPU-only on Windows. Pass `device="cuda"` to `Simulation` once a CUDA build of torch is installed.
