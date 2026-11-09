@@ -36,6 +36,22 @@ x, y = grid.coords("Ez")          # node coordinates of snapshot.frames["Ez"]
 times = snapshot.times["Ez"]
 ```
 
+### Batches
+
+`batch_size` steps several independent runs together on one grid, so every update launches once for the whole batch. The grid, the time step, the step count, and the CPML are shared. Sources and materials can differ per element:
+
+```python
+sources = [
+    [fdtd.PointSource("Ez", (50 * dx, 100 * dx), pulse)],
+    [fdtd.PointSource("Ez", (150 * dx, 60 * dx), other_pulse, amplitude=2.0)],
+    [],
+]
+eps = torch.ones(3, 200, 200)     # or shape (3,) for a uniform medium per element
+sim = Simulation(grid, Materials(eps=eps), sources, pml=CPML(frequency), batch_size=3)
+```
+
+A flat list of sources is shared by every element. Each material parameter may be a scalar, a tensor of `grid.shape`, a tensor of shape `(batch_size,)`, or a tensor of shape `(batch_size, *grid.shape)`. Fields, snapshot frames, probe values, and energies gain a leading batch axis, while an unbatched simulation has none.
+
 ## Conventions
 
 - **Units:** SI throughout. `eps` and `mu` are relative, `sigma` is in S/m, and sources are current densities in A/m².
@@ -71,6 +87,12 @@ Measured in Mcells/s on 4 CPU threads with torch 2.15, on live fields:
 | 3D 256³ | 119 | 60 | 69 |
 
 PML throughput counts the layer's cells, so it depends on how much of the grid the layer occupies.
+
+Batching pays off most on small grids, where each update is too short to cover its fixed cost. TE 101² with a 20-cell PML, float32, counting every element's cells:
+
+| Batch size | 1 | 4 | 16 | 64 |
+|---|---|---|---|---|
+| Mcells/s | 33 | 65 | 140 | 176 |
 
 ## Layout
 

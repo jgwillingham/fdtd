@@ -2,7 +2,8 @@
 
 Each ``CurlTerm`` of a grid becomes one ``Stencil``, whose slices follow from the stagger offsets
 alone, so TE, TM, and 3D share the same code. Views are built once, which keeps the stepping loop
-free of slicing and allocation.
+free of slicing and allocation. Every view spans the whole batch, so one kernel launch updates
+every batch element.
 """
 
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ import torch
 
 from fdtd.fields import Fields
 from fdtd.grid import CurlTerm, Grid
-from fdtd.materials import Coefficient
+from fdtd.materials import Coefficient, coefficient_region
 
 
 @dataclass(slots=True)
@@ -68,10 +69,13 @@ def term_slices(
 
 
 def signed_coefficient(coefficient: Coefficient, sign: float, region) -> Coefficient:
-    """The coefficient over ``region``, or the scalar itself if it is uniform."""
-    if isinstance(coefficient, torch.Tensor):
-        return sign * coefficient[region]
-    return sign * coefficient
+    """The coefficient over the spatial ``region``, or the scalar itself if it is uniform."""
+    return sign * coefficient_region(coefficient, region)
+
+
+def batched(region: tuple[slice, ...]) -> tuple[slice, ...]:
+    """A spatial region extended to every batch element."""
+    return (slice(None), *region)
 
 
 def build_stencils(
@@ -81,12 +85,12 @@ def build_stencils(
     stencils = []
     for term in grid.curl_terms(field):
         target, ahead, behind = term_slices(grid, term)
-        view = fields[term.target][target]
+        view = fields.tensors[term.target][batched(target)]
         stencils.append(
             Stencil(
                 target=view,
-                ahead=fields[term.source][ahead],
-                behind=fields[term.source][behind],
+                ahead=fields.tensors[term.source][batched(ahead)],
+                behind=fields.tensors[term.source][batched(behind)],
                 coefficient=signed_coefficient(coefficient, term.sign, target),
                 scratch=fields.scratch(view.shape),
             )

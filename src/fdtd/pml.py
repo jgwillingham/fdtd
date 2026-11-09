@@ -18,7 +18,7 @@ import torch
 from fdtd.constants import EPS0, ETA0
 from fdtd.fields import Fields
 from fdtd.grid import CurlTerm, Grid
-from fdtd.kernels import derivative_range, signed_coefficient, term_slices
+from fdtd.kernels import batched, derivative_range, signed_coefficient, term_slices
 from fdtd.materials import Coefficient
 
 
@@ -93,7 +93,7 @@ def _build_term(
     grid: Grid, fields: Fields, config: CPML, term: CurlTerm, nodes: list[int], curl, device, dtype
 ) -> PMLTerm:
     target, ahead, behind = term_slices(grid, term, range(nodes[0], nodes[-1] + 1))
-    view = fields[term.target][target]
+    view = fields.tensors[term.target][batched(target)]
 
     offset = grid.offsets(term.target)[term.axis]
     position = torch.tensor(nodes, device=device, dtype=torch.float64) + offset
@@ -105,12 +105,14 @@ def _build_term(
     gain = sigma * (decay - 1) / (kappa * (sigma + kappa * alpha))
 
     def as_field(profile: torch.Tensor) -> torch.Tensor:
-        return profile.to(dtype).reshape([-1 if a == term.axis else 1 for a in range(grid.ndim)])
+        """Broadcast a profile along the batch and the other axes."""
+        shape = [-1 if a == term.axis else 1 for a in range(grid.ndim)]
+        return profile.to(dtype).reshape([1, *shape])
 
     return PMLTerm(
         target=view,
-        ahead=fields[term.source][ahead],
-        behind=fields[term.source][behind],
+        ahead=fields.tensors[term.source][batched(ahead)],
+        behind=fields.tensors[term.source][batched(behind)],
         coefficient=signed_coefficient(curl, term.sign, target),
         decay=as_field(decay),
         gain=as_field(gain),
