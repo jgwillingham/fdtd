@@ -16,6 +16,9 @@ dependencies = [
 viz = [
     "matplotlib>=3.11.2",
 ]
+hdf5 = [
+    "h5py>=3.16.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
@@ -34,6 +37,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [dependency-groups]
 dev = [
+    "h5py>=3.16.0",
     "pytest>=9.2.0",
     "ruff>=0.17.3",
     "scipy>=1.18.1",

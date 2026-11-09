@@ -1,12 +1,28 @@
-"""Observers that record simulation data while it runs."""
+"""Observers that record simulation data while it runs.
+
+Each monitor defines what to measure through ``sample``, and keeps what it measures in memory
+through ``record``. ``fdtd.io.HDF5Writer`` streams the same samples to a file instead.
+"""
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 import numpy as np
 
 if TYPE_CHECKING:
     from fdtd.simulation import Simulation
+
+
+class Sample(NamedTuple):
+    """One measurement: ``values`` of quantity ``key`` at ``time`` (s).
+
+    ``values`` has the batch axis first in a batched simulation, and may share memory with the
+    simulation's fields, so copy it before the next step if it must be kept.
+    """
+
+    key: str
+    time: float
+    values: np.ndarray
 
 
 class Monitor(Protocol):
@@ -33,10 +49,15 @@ class Probe:
     times: list[float] = field(default_factory=list)
     values: list[float] | list[list[float]] = field(default_factory=list)
 
-    def record(self, sim: "Simulation") -> None:
+    def sample(self, sim: "Simulation") -> list[Sample]:
         index = sim.grid.nearest_index(self.component, self.position)
-        self.times.append(sim.field_time(self.component))
-        self.values.append(sim.fields[self.component][(..., *index)].tolist())
+        value = sim.fields[self.component][(..., *index)].cpu().numpy()
+        return [Sample(self.component, sim.field_time(self.component), value)]
+
+    def record(self, sim: "Simulation") -> None:
+        for _, time, values in self.sample(sim):
+            self.times.append(time)
+            self.values.append(values.tolist())
 
     def reset(self) -> None:
         self.times.clear()
@@ -57,10 +78,16 @@ class Snapshot:
     times: dict[str, list[float]] = field(default_factory=dict)
     frames: dict[str, list[np.ndarray]] = field(default_factory=dict)
 
+    def sample(self, sim: "Simulation") -> list[Sample]:
+        return [
+            Sample(name, sim.field_time(name), sim.field(name).cpu().numpy())
+            for name in self.components
+        ]
+
     def record(self, sim: "Simulation") -> None:
-        for name in self.components:
-            self.times.setdefault(name, []).append(sim.field_time(name))
-            self.frames.setdefault(name, []).append(sim.field(name).cpu().numpy().copy())
+        for name, time, values in self.sample(sim):
+            self.times.setdefault(name, []).append(time)
+            self.frames.setdefault(name, []).append(values.copy())
 
     def reset(self) -> None:
         self.times.clear()
@@ -79,9 +106,13 @@ class Energy:
     times: list[float] = field(default_factory=list)
     values: list[float] | list[list[float]] = field(default_factory=list)
 
+    def sample(self, sim: "Simulation") -> list[Sample]:
+        return [Sample("energy", sim.time, np.asarray(sim.energy()))]
+
     def record(self, sim: "Simulation") -> None:
-        self.times.append(sim.time)
-        self.values.append(sim.energy())
+        for _, time, values in self.sample(sim):
+            self.times.append(time)
+            self.values.append(values.tolist())
 
     def reset(self) -> None:
         self.times.clear()

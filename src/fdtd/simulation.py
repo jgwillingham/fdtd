@@ -61,6 +61,10 @@ class Simulation:
         self.grid = grid
         self.batch_size = batch_size
         self.materials = materials if materials is not None else Materials()
+        self.element_sources = sources_per_element(sources, batch_size)
+        self.pml = pml
+        self.device = torch.device(device)
+        self.dtype = dtype
         self.monitors = list(monitors)
         self.fields = Fields(grid, device, dtype, batch_size)
         self.step_count = 0
@@ -86,7 +90,7 @@ class Simulation:
             self._e_updates += e_terms
 
         self._injector = Injector(
-            sources_per_element(sources, batch_size),
+            self.element_sources,
             grid,
             self.fields,
             coefficients.e_source,

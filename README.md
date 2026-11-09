@@ -7,7 +7,7 @@ A finite-difference time-domain solver for Maxwell's equations, written in PyTor
 The project is managed with [uv](https://docs.astral.sh/uv/).
 
 ```
-uv sync --extra viz
+uv sync --extra viz --extra hdf5
 uv run pytest                     # fast tests
 uv run pytest -o addopts="" -m slow   # long stability and 3D reflection tests
 uv run python benchmarks/bench_step.py
@@ -52,6 +52,24 @@ sim = Simulation(grid, Materials(eps=eps), sources, pml=CPML(frequency), batch_s
 ```
 
 A flat list of sources is shared by every element. Each material parameter may be a scalar, a tensor of `grid.shape`, a tensor of shape `(batch_size,)`, or a tensor of shape `(batch_size, *grid.shape)`. Fields, snapshot frames, probe values, and energies gain a leading batch axis, while an unbatched simulation has none.
+
+### Saving to HDF5
+
+`fdtd.io.HDF5Writer` (needs the `hdf5` extra) streams results to disk as the simulation runs, so long runs never hold their snapshots in memory. The monitors you pass it choose what is saved, and each becomes a named group:
+
+```python
+from fdtd.io import HDF5Writer
+
+outputs = {
+    "fields": fdtd.Snapshot(("Ez", "Hx", "Hy"), every=10),
+    "receiver": fdtd.Probe("Ez", (150 * dx, 100 * dx)),
+    "energy": fdtd.Energy(every=50),
+}
+with HDF5Writer("run.h5", sim, outputs, dtype=np.float32, compression="gzip"):
+    sim.run(steps=2000)
+```
+
+The file also records everything needed to interpret and reproduce the data: the grid, dtype, device, and batch size; the materials as given; the CPML settings; and every source, with its batch element and its waveform's parameters as JSON. Each saved quantity sits at `/outputs/<name>/<key>/` with `values` of shape `(samples, [batch], ...)`, `time`, `step`, and, for snapshots, the node coordinates `x`, `y`, `z` of that component. The docstring of `fdtd/io.py` lists the full layout.
 
 ## Conventions
 
@@ -107,4 +125,5 @@ Batching pays off most on small grids, where each update is too short to cover i
 | `sources.py` | Waveforms and point sources |
 | `monitors.py` | Probe, Snapshot, and Energy recorders |
 | `simulation.py` | Time stepping |
+| `io.py` | Optional HDF5 output, with the simulation's metadata |
 | `viz.py` | Optional plotting helpers |
